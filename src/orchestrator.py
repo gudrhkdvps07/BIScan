@@ -5,9 +5,10 @@ ver2 오케스트레이터.
 import io
 import json
 import os
+import re
 import sys
 from dataclasses import asdict, replace
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
 
 for _stream in (sys.stdout, sys.stderr):
     if isinstance(_stream, io.TextIOWrapper):
@@ -37,6 +38,8 @@ from analyzer.sqli_detector import analyze_family
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _TARGET_CONFIG = os.path.join(_PROJECT_ROOT, "config", "target_config.json")
+_MAX_SWEEP_VARIANTS = 10  # 경로 하나당 sweep에 더할 값 변형 주소 상한
+_CLEAN_VALUE = re.compile(r"^[\w.@-]*$")  # 공격 문자 없는 쿼리 값만 sweep 변형으로 허용
 
 
 # delivery_unknown case의 판정 대체 기록
@@ -127,6 +130,41 @@ def _sweep_pages(targets: list[dict], base_host: str) -> list[tuple[str, dict]]:
         seen.add(url)
         pages.append((url, target))
     return pages
+
+
+# sweep에 더할 수집 기록 GET 주소 - dedup으로 하나만 남은 값 변형(profile.php?user=X 등)을 되살림, 쿠키와 헤더는 같은 경로 target 것 사용
+def _sweep_variants(messages_path: str, pages: list[tuple[str, dict]]) -> list[tuple[str, dict]]:
+    if not os.path.exists(messages_path):
+        return []
+    with open(messages_path, encoding="utf-8") as f:
+        messages = json.load(f)
+    by_base = {_base_of(url): target for url, target in pages}  # 스캔 대상과 같은 경로만 허용
+    seen = {url for url, _ in pages}
+    per_base: dict[str, int] = {}
+    variants: list[tuple[str, dict]] = []
+    for msg in messages:
+        line = (msg.get("requestHeader") or "").split("\r\n", 1)[0].split(" ")
+        status = (msg.get("responseHeader") or "").split(" ", 2)
+        if len(line) < 2 or line[0] != "GET" or len(status) < 2 or not status[1].startswith("2"):
+            continue
+        url = line[1].split("#", 1)[0]
+        query = parse_qs(urlparse(url).query, keep_blank_values=True)
+        target = by_base.get(_base_of(url))
+        if not query or target is None or url in seen or has_destructive_action(query):
+            continue
+        if not all(_CLEAN_VALUE.match(v) and not v.lower().startswith("ibds") for vs in query.values() for v in vs):
+            continue  # 이전 스캔 공격 주소와 마커가 ZAP 기록에 남아 있어 깨끗한 값만 재조회
+        if per_base.get(_base_of(url), 0) >= _MAX_SWEEP_VARIANTS:
+            continue
+        per_base[_base_of(url)] = per_base.get(_base_of(url), 0) + 1
+        seen.add(url)
+        variants.append((url, target))
+    return variants
+
+
+def _base_of(url: str) -> str:
+    p = urlparse(url)
+    return f"{p.scheme}://{p.netloc}{p.path}"
 
 
 # 같은 폼의 지점은 서로 다른 묶음에 나눈다
@@ -375,6 +413,7 @@ def run_pipeline(on_paths_ready=None, on_progress=None, should_stop=None, output
     scan_points += build_fragment_points(targets, scan_points)  # 스캔 지점 없는 GET 페이지는 DOM hash 검사용 지점 1개
     base_host = urlparse(load_json(_TARGET_CONFIG, default={}).get("target_url", "")).netloc  # 훑기 외부 호스트 제외 기준
     sweep_pages = _sweep_pages(targets, base_host)  # 저장형 출력 위치 탐색 후보 (form 지점 마커를 묶음마다 함께 찾음)
+    sweep_pages += _sweep_variants(os.path.join(out_dir, "zap_messages.json"), sweep_pages)
     progress.total = len(scan_points)
     progress.publish()
 
