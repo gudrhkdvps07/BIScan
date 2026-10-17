@@ -190,7 +190,6 @@ def probe_sink(sp, target: dict, marker: str, requester, zap):
         checked_urls=checked_urls,
         invalid_revisits=invalid_revisits,
         post_status=post_status,
-        login_redirect=_is_login_redirect(post_status, location_url),
     )
 
 
@@ -237,8 +236,6 @@ def finalize_probe(r) -> tuple[str | None, str | None]:
         notes.append(f"저장 요청 응답 무효 ({r.post_status})")
     if r.invalid_revisits:
         notes.append(f"재조회 응답 무효: {', '.join(r.invalid_revisits)}")
-    if r.login_redirect and notes:
-        notes.insert(0, "저장 요청 뒤 로그인 화면으로 이동")
     if notes:
         return "sink_probe_failed", "; ".join(notes)
     if r.checked_count == 0:
