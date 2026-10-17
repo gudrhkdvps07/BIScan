@@ -193,7 +193,7 @@ def _route_scan_point(sp: ScanPoint, target: dict, zap, stored_probes: dict | No
 
     try:
         if use_discovery:
-            xss_fail_reason = "discovery_failed"  # 사전 확인 실패는 반사 없음으로 넘기지 않고 검토 필요
+            xss_fail_reason = "discovery_failed"  # 사전 확인 실패는 반사 없음으로 넘기지 않고 판단 보류
             discovery = run_discovery(sp, target, zap)  # 특수문자가 반사되는 것들만 filtering.
             xss_fail_reason = "prepare_failed"
         else:
