@@ -80,7 +80,6 @@ STORED_BATCH_SIZE = 20  # 마커를 몇 지점씩 묶어 주입하고 훑을지 
 _MAX_SWEEP_PAGES = 500  # 묶음마다 훑을 페이지 상한
 _STATIC_EXT = (".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp",
                ".woff", ".woff2", ".ttf", ".swf", ".map", ".pdf")
-_LOGIN_HINTS = ("login", "signin", "sign-in", "logon")
 
 
 # 저장 요청 응답 판정용 - 2xx와 3xx 유효 (저장 후 302 PRG가 정상 흐름)
@@ -91,13 +90,6 @@ def _is_valid_status(status) -> bool:
 # 재조회 판정용 - 목적지 내용을 실제로 받은 2xx만 유효 (3xx는 followredirects=False라 껍데기, 4xx와 5xx는 오류)
 def _is_revisit_ok(status) -> bool:
     return isinstance(status, int) and 200 <= status < 300
-
-
-# 저장 요청이 로그인 화면으로 이동했는지 - finalize_probe 진단 노트용 (가입 후 로그인 이동 같은 정상 흐름도 걸려 이것만으로 세션 만료로 보지 않음)
-def _is_login_redirect(status, location_url: str | None) -> bool:
-    if not (isinstance(status, int) and 300 <= status < 400 and location_url):
-        return False
-    return any(h in urlparse(location_url).path.lower() for h in _LOGIN_HINTS)
 
 
 # 재조회 GET 한 번 - (응답 본문, 응답 상태 코드) 반환
