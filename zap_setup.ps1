@@ -28,8 +28,8 @@ docker run -u zap --name zap `
     "-config" "api.addrs.addr.name=.*" `
     "-config" "api.addrs.addr.regex=true" `
     "-config" "api.key=$API_KEY" `
-    "-config" "formhandler.fields.field(13).value=IBDS test" `
-    "-config" "formhandler.fields.field(14).value=IBDS test"  # Value Generator 기본 문장 단축 (13: comment 계열, 14: content 계열)
+    "-config" "formhandler.fields.field(13).value=Biscan test" `
+    "-config" "formhandler.fields.field(14).value=Biscan test"  # Value Generator 기본 문장 단축 (13: comment 계열, 14: content 계열)
 
 # 3. wait until ready (max 60s)
 Write-Host "[3/4] Waiting for ZAP to initialize..."

@@ -9,7 +9,7 @@ export const statusClass = (s) => order.includes(s) ? s : 'unknown';
 export function element(tag, text, className) { const node=document.createElement(tag); if(text!==undefined)node.textContent=text; if(className)node.className=className; return node; }
 export function notice(text, bad=false) { $('message').textContent=text; $('message').className=bad?'notice danger':'notice success'; $('message').hidden=!text; }
 export async function api(path, data) {
-    const options=data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','X-IBDS-Client':'local-ui'},body:JSON.stringify(data)};
+    const options=data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','X-Biscan-Client':'local-ui'},body:JSON.stringify(data)};
     const response=await fetch(path,options);
     const body=await response.json();
     if(!response.ok) { const detail=body.detail; throw new Error(Array.isArray(detail)?detail.map(x=>x.msg).join(' / '):detail||'요청을 처리하지 못했습니다.'); }

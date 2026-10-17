@@ -13,7 +13,7 @@ try:
 except Exception:
     MutationCase = SinkProbeResult = None
 
-MARKER_PREFIX = "ibds"
+MARKER_PREFIX = "Biscan"
 REVISIT_MAX_RETRY = 3      # revisit_max_retry
 REVISIT_AWAIT_MS = 500     # revisit_await_ms
 
