@@ -58,6 +58,7 @@ Write-Host "  Certificate saved: $CERT_PATH"
 
 # 5. generate zap_config.json
 $CONFIG_PATH = Join-Path $PSScriptRoot "config\zap_config.json"
+New-Item -ItemType Directory -Force (Split-Path $CONFIG_PATH) | Out-Null  # config 폴더가 없을 때 생성
 @{
     host    = "127.0.0.1"
     port    = $ZAP_PORT
