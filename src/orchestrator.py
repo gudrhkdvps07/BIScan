@@ -107,10 +107,7 @@ def _suffix_family_id(family: RequestFamily, suffix: str) -> None:
         case.case_id = case.case_id.replace(old, family.family_id, 1)
 
 
-# 저장 출력 위치 탐색(sweep)용 수집된 GET 주소와 그 주소를 수집한 타겟 목록 (파괴적 액션 타겟 제외)
-# 저장형 출력 위치 후보 GET 페이지 목록 (url, 그 페이지를 수집한 target)
-# 요청을 보내기 전에 거른다 - 외부 호스트와 로그아웃·삭제 같은 위험 주소는 훑지 않는다
-# 파라미터 없는 /logout 같은 GET은 has_destructive_action(값만 봄)으로 못 거르므로 URL 경로도 본다
+# sweep용 수집 GET 주소 목록 (url, 수집한 target), 외부 호스트와 로그아웃 삭제 같은 위험 URL은 경로까지 보고 제외
 def _sweep_pages(targets: list[dict], base_host: str) -> list[tuple[str, dict]]:
     pages: list[tuple[str, dict]] = []
     seen: set[str] = set()
@@ -129,9 +126,7 @@ def _sweep_pages(targets: list[dict], base_host: str) -> list[tuple[str, dict]]:
     return pages
 
 
-# 같은 폼의 지점은 서로 다른 묶음에 나눈다
-# 같은 폼의 다른 필드를 한 묶음에 넣으면 뒤 저장 요청이 앞 필드를 원래 값으로 덮어써 훑기 전에 마커가 사라진다
-# 같은 폼이 서로 다른 target_id로 중복 수집될 수 있어 target_id 대신 폼 서명(form_key, 보통 method+url)으로 가른다
+# 같은 폼의 지점은 다른 묶음으로 분리 (뒤 저장 요청이 앞 필드를 덮어써 마커가 사라짐), target_id 대신 form_key로 가름
 def _stored_batches(points: list[ScanPoint], form_key) -> list[list[ScanPoint]]:
     batches: list[list[ScanPoint]] = []
     for sp in points:
@@ -144,8 +139,7 @@ def _stored_batches(points: list[ScanPoint], form_key) -> list[list[ScanPoint]]:
     return batches
 
 
-# 스캔 전 저장형 사전 확인 - form 지점에 마커를 묶음으로 주입하고 수집 페이지를 함께 훑어 지점별 출력 위치를 정한다
-# 지점마다 모든 페이지를 훑으면 요청이 지점 수와 페이지 수의 곱만큼 늘어나서 묶음 단위로 한 번씩만 훑는다
+# 스캔 전 저장형 사전 확인 - form 지점에 마커를 묶음으로 주입하고 수집 페이지를 묶음 단위로 한 번씩 훑어 출력 위치 결정
 def _run_stored_probes(scan_points: list[ScanPoint], target_by_id: dict, zap, marker_factory,
                        sweep_pages: list[tuple[str, dict]], progress) -> dict:
     points = [sp for sp in scan_points
