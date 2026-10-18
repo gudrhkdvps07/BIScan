@@ -4,19 +4,20 @@ from playwright.sync_api import sync_playwright
 
 # 화면 report.js와 같은 용어
 _VERDICT = {"potential_high": "취약 가능성 높음", "potential_medium": "취약 신호 관찰",
-            "inconclusive": "검토 필요", "potential_low": "공격 근거 미확인"}
+            "inconclusive": "판단 보류", "potential_low": "공격 근거 미확인"}
 _ORDER = list(_VERDICT)
 _PROGRESS = {"completed": "완료", "partial": "부분 완료", "failed": "실패", "not_run": "미실행"}
 _REASON = {"delivery_unknown": "전송 결과 불명", "attack_request_failed": "공격 요청 실패", "baseline_failed": "기준 요청 실패",
            "auth_failed": "인증 실패", "session_expired": "세션 만료", "discovery_failed": "사전 확인 요청 실패",
            "prepare_failed": "준비 단계 실패", "revisit_url_missing": "재조회 주소 없음", "revisit_failed": "재조회 실패",
-           "sink_not_confirmed": "저장 위치 미확인", "browser_timeout": "브라우저 시간 초과", "browser_failed": "브라우저 실행 실패",
+           "sink_not_confirmed": "저장 위치 미확인", "sink_not_found_in_scope": "수집 범위 내 미발견",
+           "sink_probe_failed": "저장형 확인 실패", "browser_timeout": "브라우저 시간 초과", "browser_failed": "브라우저 실행 실패",
            "state_unclear": "이번 시도와 구분 불가", "cancelled_by_user": "사용자 중단", "out_of_scope": "범위 밖 이동",
            "not_reached": "앞 단계 실패로 미도달"}
 _STAGE = {"completed": "검사 완료", "stopped": "사용자에 의해 중단됨", "failed": "실패로 중단됨",
           "interrupted": "서버 종료로 중단됨", "scanning": "검사 진행 중", "collecting": "요청 수집 중"}
 _VULN = {"xss": "XSS", "sqli": "SQLi"}
-_TITLE = "IBDS 검사 보고서"
+_TITLE = "BIScan 검사 보고서"
 _FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI','Malgun Gothic',sans-serif"
 _MARGIN = {"top": "20mm", "bottom": "20mm", "left": "18mm", "right": "18mm"}
 
@@ -126,7 +127,7 @@ def render_html(report):
     kpis = "".join(f'<div class="kpi {key}"><span>{_e(label)}</span><strong>{counts.get(key, 0)}</strong></div>'
                    for key, label in _VERDICT.items())
     rates_line = (f"검사 지점 <b>{rates.get('points', len(groups))}개</b>, 완료율 <b>{_pct(rates['completion'])}</b>, "
-                  f"검토 필요율 <b>{_pct(rates['inconclusive'])}</b>, 침묵 음성 <b>{rates['silent_negatives']}건</b>, "
+                  f"판단 보류율 <b>{_pct(rates['inconclusive'])}</b>, 침묵 음성 <b>{rates['silent_negatives']}건</b>, "
                   f"오류 <b>{report.get('error_count', 0)}건</b>") if rates else f"검사 지점 <b>{len(groups)}개</b>"
 
     # 판정별로 나눈 검사 지점 표

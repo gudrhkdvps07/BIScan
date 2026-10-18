@@ -3,6 +3,7 @@
 *.env
 .venv
 .claude
+.codex
 
 # Python cache
 __pycache__/
@@ -20,7 +21,10 @@ results/
 # 테스트용
 CLAUDE.md
 reference/
-docs/
+archives_docs/
 
 # 인증서
 *.cer
+
+# 임시파일
+tmp/
