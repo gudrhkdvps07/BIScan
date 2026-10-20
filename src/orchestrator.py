@@ -14,7 +14,7 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(encoding="utf-8", errors="backslashreplace")
 
 from collector.main_collector import run_collection
-from scan.mutation.discovery import DiscoveryFilterStat, measure_dynamic_markers, run_discovery
+from scan.match.discovery import DiscoveryFilterStat, measure_dynamic_markers, run_discovery
 from scan.mutation.request_builder import (
     FRAGMENT_LOCATION, build_fragment_points, generate_dom_fragment_families,
     generate_sqli_families, generate_stored_xss_families, generate_xss_families_counted,
