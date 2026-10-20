@@ -7,7 +7,7 @@ from typing import Callable
 from scan.match.matcher import AttackRule, match_and_render
 from scan.match.rules_builder import get_rules
 from ..models import DiscoveryResult, RequestFamily, ScanPoint
-from .discovery import _CANDIDATE_SPECIALS, DiscoveryFilterStat
+from ..match.discovery import _CANDIDATE_SPECIALS, DiscoveryFilterStat
 from .scan_point import build_scan_points
 from .variant import build_baseline_case, build_mutation_case
 
