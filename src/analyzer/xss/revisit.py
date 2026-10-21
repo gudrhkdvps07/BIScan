@@ -13,7 +13,7 @@ try:
 except Exception:
     MutationCase = SinkProbeResult = None
 
-MARKER_PREFIX = "ibds"
+MARKER_PREFIX = "Biscan"
 REVISIT_MAX_RETRY = 3      # revisit_max_retry
 REVISIT_AWAIT_MS = 500     # revisit_await_ms
 
@@ -61,8 +61,7 @@ def _get_headers_for_revisit(target: dict) -> dict:
             if k.lower() not in ("content-type", "content-length")} # 원본 요청 헤더에서 POST 전용 헤더(Content-Type/Length) 제거
 
 
-# 마커 반사 프로브가 어디서 마커 반사를 할지 결정
-# 우선순위: 유저가 명시한 revisit_url → 동일 호스트 referer → base_url(그 파라미터가 나온곳) → target_url
+# 재조회 주소 결정 - 유저 지정 revisit_url, 동일 호스트 referer, base_url, target_url 순서
 def resolve_revisit_url(target: dict) -> str:
     if explicit := target.get("revisit_url"):
         return explicit
@@ -76,8 +75,25 @@ def resolve_revisit_url(target: dict) -> str:
     return target.get("base_url") or target.get("url", "")
 
 
-# 마커 반사 확인
-def _reflect_at(target: dict, url: str, marker: str, requester, zap, case_id: str) -> bool:
+_MAX_EXTRA_SINKS = 3  # sweep으로 찾은 추가 출력 위치 상한 (위치마다 stored family 세트가 하나씩 늘어남)
+STORED_BATCH_SIZE = 20  # 마커를 몇 지점씩 묶어 주입하고 훑을지 - 뒤 저장 요청이 앞 마커를 덮어쓰거나 목록 밖으로 밀어내는 것 방지
+_MAX_SWEEP_PAGES = 500  # 묶음마다 훑을 페이지 상한
+_STATIC_EXT = (".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp",
+               ".woff", ".woff2", ".ttf", ".swf", ".map", ".pdf")
+
+
+# 저장 요청 응답 판정용 - 2xx와 3xx 유효 (저장 후 302 PRG가 정상 흐름)
+def _is_valid_status(status) -> bool:
+    return isinstance(status, int) and 200 <= status < 400
+
+
+# 재조회 판정용 - 목적지 내용을 실제로 받은 2xx만 유효 (3xx는 followredirects=False라 껍데기, 4xx와 5xx는 오류)
+def _is_revisit_ok(status) -> bool:
+    return isinstance(status, int) and 200 <= status < 300
+
+
+# 재조회 GET 한 번 - (응답 본문, 응답 상태 코드) 반환
+def _fetch(target: dict, url: str, requester, zap, case_id: str) -> tuple[str, int | None]:
     get_case = MutationCase(
         case_id=case_id,
         step="probe_revisit",
@@ -89,14 +105,22 @@ def _reflect_at(target: dict, url: str, marker: str, requester, zap, case_id: st
         body="",
     )
     resp = requester.send(get_case, zap)
-    return marker in (resp.get("response_body") or "")  # marker 반사 여부만 bool로 확인 (본문 자체는 버림)
+    return resp.get("response_body") or "", resp.get("response_status")
 
 
-_MAX_EXTRA_SINKS = 3  # sweep으로 찾은 추가 출력 위치 상한 (위치마다 stored family 세트가 하나씩 늘어남)
+# 재조회 응답을 미발견 근거로 쓸 수 있으면 None, 2xx가 아니면 목적지를 못 받은 것이라 사유 반환
+def _invalid_note(url: str, status) -> str | None:
+    return None if _is_revisit_ok(status) else f"{url} ({status})"
 
 
-# 반사 확인 - marker로 param 값 교체해 POST 후 revisit_url(실패 시 base_url) GET으로 확인, 저장 확인 시 sweep_urls에서 다른 출력 위치도 탐색
-def probe_sink(sp, target: dict, marker: str, requester, zap, sweep_urls: list[str] | None = None):
+# 마커 반사 확인 - 2xx 본문에서 마커가 보여야 확정 (3xx 리다이렉트 본문 echo와 오류 페이지 오탐 차단)
+def _reflect_at(target: dict, url: str, marker: str, requester, zap, case_id: str) -> tuple[bool, str | None]:
+    body, status = _fetch(target, url, requester, zap, case_id)
+    return (_is_revisit_ok(status) and marker in body), _invalid_note(url, status)
+
+
+# 1단계 마커 주입 - param 값을 marker로 바꿔 POST 후 revisit_url 재조회로 확인, 다른 페이지 출력은 sweep_markers가 처리
+def probe_sink(sp, target: dict, marker: str, requester, zap):
     param = sp.name
     post_case = build_mutation_case(
         target=target,
@@ -109,41 +133,36 @@ def probe_sink(sp, target: dict, marker: str, requester, zap, sweep_urls: list[s
         value_index=sp.value_index,
     )
     sent = requester.send(post_case, zap)  # POST 응답 본문은 보지 않음(에코 오판 방지)
+    post_status = sent.get("response_status")
 
-    # POST 응답 Location으로 동적 revisit_url 결정 (write.php처럼 매번 새 id가 생기는 경우 대응)
-    # 범위 밖(외부 호스트) Location은 따르지 않고 기존 정책(override/referer/base_url)으로 폴백 (af.md #8·#12)
-    # 유저가 명시한 revisit_url이 최우선 — PRG(저장 후 자기 자신으로 이동)처럼 Location이 출력 위치가 아닌 경우 대응
+    # 동적 revisit_url 결정 - 유저 지정이 최우선, 그다음 같은 호스트 PRG Location, 마커 든 Location은 반사라 제외, 없으면 기존 정책
     location = (sent.get("response_headers") or {}).get("location")
     location_url = urljoin(post_case.url, location) if location else None
     if target.get("revisit_url"):
         revisit_url, source = target["revisit_url"], "explicit"
-    elif location_url and is_same_host(target.get("url", ""), location_url):
+    elif location_url and is_same_host(target.get("url", ""), location_url) and marker not in location_url:
         revisit_url, source = location_url, "location"
     else:
         revisit_url, source = resolve_revisit_url(target), "default"
     used_url = revisit_url
-    confirmed = _reflect_at(target, revisit_url, marker, requester, zap,
-                            case_id=f"probe_{sp.target_id}_{sp.tag}_revisit")
+    checked_urls = [revisit_url]
+    invalid_revisits: list[str] = []
+    confirmed, invalid = _reflect_at(target, revisit_url, marker, requester, zap,
+                                     case_id=f"probe_{sp.target_id}_{sp.tag}_revisit")
+    if not confirmed and invalid:
+        invalid_revisits.append(invalid)
 
     if not confirmed:
         base_url = target.get("base_url") or ""
         if base_url and base_url != revisit_url:
-            if _reflect_at(target, base_url, marker, requester, zap,
-                           case_id=f"probe_{sp.target_id}_{sp.tag}_revisit_base"):
+            checked_urls.append(base_url)
+            found, invalid = _reflect_at(target, base_url, marker, requester, zap,
+                                         case_id=f"probe_{sp.target_id}_{sp.tag}_revisit_base")
+            if found:
                 confirmed = True
                 used_url, source = base_url, "default"
-
-    # 저장이 확인된 파라미터만 다른 출력 위치 탐색 — 저장 안 되는 대상(반사형 전용 등)엔 요청을 늘리지 않음
-    extra_sinks: list[str] = []
-    if confirmed and sweep_urls:
-        for idx, url in enumerate(sweep_urls):
-            if len(extra_sinks) >= _MAX_EXTRA_SINKS:
-                break
-            if url == used_url or not is_same_host(target.get("url", ""), url):
-                continue
-            if _reflect_at(target, url, marker, requester, zap,
-                           case_id=f"probe_{sp.target_id}_{sp.tag}_sweep{idx}"):
-                extra_sinks.append(url)
+            elif invalid:
+                invalid_revisits.append(invalid)
 
     return SinkProbeResult(
         param=param,
@@ -152,8 +171,58 @@ def probe_sink(sp, target: dict, marker: str, requester, zap, sweep_urls: list[s
         inconclusive=not confirmed,
         probe_marker=marker,
         revisit_source=source,
-        extra_sinks=extra_sinks,
+        checked_urls=checked_urls,
+        invalid_revisits=invalid_revisits,
+        post_status=post_status,
     )
+
+
+# 2단계 묶음 공동 조회 - 수집 페이지를 한 번씩 훑어 어느 마커가 어디에 나오는지 지점별 출력 위치를 연결 (지점별 전체 훑기보다 요청 절감)
+def sweep_markers(probes: list, pages: list[tuple[str, dict]], requester, zap, batch_id: int) -> None:
+    markers = [r.probe_marker for _, r in probes]
+    targets = [(url, page_target) for url, page_target in pages
+               if not urlparse(url).path.lower().endswith(_STATIC_EXT)
+               and not any(m in url for m in markers)]  # 주소에 마커가 들면 반사라서 저장 근거가 못 됨
+    limit_hit = len(targets) > _MAX_SWEEP_PAGES
+    checked, failed = 0, []
+    for idx, (url, page_target) in enumerate(targets[:_MAX_SWEEP_PAGES]):
+        try:
+            body, status = _fetch(page_target, url, requester, zap, case_id=f"probe_sweep_b{batch_id}_{idx}")
+        except Exception as e:
+            failed.append(f"{url} ({e})")
+            continue
+        if invalid := _invalid_note(url, status):
+            failed.append(invalid)
+            continue
+        checked += 1
+        for target, r in probes:
+            if r.probe_marker not in body or url == r.revisit_url or not is_same_host(target.get("url", ""), url):
+                continue
+            if not r.sink_confirmed:  # 주입 직후 확인에서 못 찾은 지점 - 다른 페이지 출력
+                r.sink_confirmed, r.inconclusive = True, False
+                r.revisit_url, r.revisit_source = url, "sweep"
+            elif url not in r.extra_sinks and len(r.extra_sinks) < _MAX_EXTRA_SINKS:
+                r.extra_sinks.append(url)
+    for _, r in probes:
+        r.batch_id, r.checked_count, r.failed_urls, r.sweep_limit_hit = batch_id, checked, list(failed), limit_hit
+
+
+# 3단계 저장형 사유 코드 결정
+def finalize_probe(r) -> tuple[str | None, str | None]:
+    if r.sink_confirmed:  # 마커를 찾았으면 사유 없음
+        return None, None
+    # 출력 위치 확인부
+    notes = []
+    if not _is_valid_status(r.post_status):
+        notes.append(f"저장 요청 응답 무효 ({r.post_status})")
+    if r.invalid_revisits:
+        notes.append(f"재조회 응답 무효: {', '.join(r.invalid_revisits)}")
+    if notes:
+        return "sink_probe_failed", "; ".join(notes)
+    if r.checked_count == 0:
+        # 훑은 페이지가 하나도 없으면 수집 범위 내 미발견이라 부를 근거가 없다 (수집 GET 페이지 0곳이거나 전부 조회 실패)
+        return "sink_probe_failed", (f"훑은 페이지 없음 (조회 실패 {len(r.failed_urls)}곳)" if r.failed_urls else "훑은 페이지 없음 (수집 GET 페이지 0곳)")
+    return "sink_not_found_in_scope", (f"훑기 조회 실패 {len(r.failed_urls)}곳으로 일부 범위 미탐색" if r.failed_urls else None)
 
 
 # refetch() 반환값 (재조회 이후 값)
